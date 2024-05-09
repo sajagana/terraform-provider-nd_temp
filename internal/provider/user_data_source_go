@@ -1,0 +1,543 @@
+package provider
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/ciscoecosystem/mso-go-client/client"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+)
+
+// Ensure provider defined types fully satisfy framework interfaces.
+var _ datasource.DataSource = &UserDataSource{}
+
+func NewUserDataSource() datasource.DataSource {
+	return &UserDataSource{}
+}
+
+// UserDataSource defines the data source implementation.
+type UserDataSource struct {
+	client *client.Client
+}
+
+func (d *UserDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	tflog.Debug(ctx, "Start metadata of datasource: "+req.ProviderTypeName+"_user")
+	resp.TypeName = req.ProviderTypeName + "_user"
+	tflog.Debug(ctx, "End metadata of datasource: "+req.ProviderTypeName+"_user")
+}
+
+type UserResourceModel struct {
+	Id            types.String `tfsdk:"id"`
+	UserID        types.String `tfsdk:"user_id"`
+	UserName      types.String `tfsdk:"user_name"` // loginID
+	FirstName     types.String `tfsdk:"first_name"`
+	LastName      types.String `tfsdk:"last_name"`
+	Email         types.String `tfsdk:"email"`
+	AccountStatus types.String `tfsdk:"account_status"`
+
+	UserFlags       types.Float64 `tfsdk:"user_flags"`
+	UserPreferences types.Set     `tfsdk:"user_preferences"`
+	// UserRbac        types.Set   `tfsdk:"userRbac"`
+
+	UserPassword types.String `tfsdk:"user_password"` // Is not available in the get response
+}
+
+type UserPreferencesModel struct {
+	autoSave types.Bool `tfsdk:"auto_save"`
+	whatsNew types.Bool `tfsdk:"whats_new"`
+}
+
+// type UserRbacModel struct {
+// 	Name     types.String `tfsdk:"name"`
+// 	UserPriv types.String `tfsdk:"userPriv"`
+// }
+
+func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	tflog.Debug(ctx, "Start schema of datasource: hashicups_user")
+	resp.Schema = schema.Schema{
+		// This description is used by the documentation generator and the language server.
+		MarkdownDescription: "The vrf_fallback_route_group_member datasource for the 'ND User' class",
+
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The distinguished name (DN) of the VRF Fallback Route Group Member object.",
+			},
+			"user_id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The distinguished name (DN) of the VRF Fallback Route Group Member object.",
+			},
+			"user_name": schema.StringAttribute{
+				Required:            true,
+				MarkdownDescription: "The distinguished name (DN) of the VRF Fallback Route Group Member object.",
+			},
+			"user_password": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The distinguished name (DN) of the parent object.",
+			},
+			"first_name": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: `The description of the VRF Fallback Route Group Member object.`,
+			},
+			"last_name": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: `The annotation of the VRF Fallback Route Group Member object.`,
+			},
+
+			"email": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: `The annotation of the VRF Fallback Route Group Member object.`,
+			},
+
+			"user_flags": schema.Float64Attribute{
+				Optional:            true,
+				MarkdownDescription: `The annotation of the VRF Fallback Route Group Member object.`,
+			},
+
+			// "phone": schema.StringAttribute{
+			// 	Computed:            true,
+			// 	MarkdownDescription: `The annotation of the VRF Fallback Route Group Member object.`,
+			// },
+
+			"account_status": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: `The annotation of the VRF Fallback Route Group Member object.`,
+			},
+
+			// 	"domain": schema.StringAttribute{
+			// 		Computed:            true,
+			// 		MarkdownDescription: `The annotation of the VRF Fallback Route Group Member object.`,
+			// 	},
+
+			"user_preferences": schema.SetNestedAttribute{
+				MarkdownDescription: ``,
+				Computed:            true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"auto_save": schema.BoolAttribute{
+							Computed:            true,
+							MarkdownDescription: `The key used to uniquely identify this configuration object.`,
+						},
+						"whats_new": schema.BoolAttribute{
+							Computed:            true,
+							MarkdownDescription: `The value of the property.`,
+						},
+					},
+				},
+			},
+
+			// 	"roles": schema.SetNestedAttribute{
+			// 		MarkdownDescription: ``,
+			// 		Computed:            true,
+			// 		NestedObject: schema.NestedAttributeObject{
+			// 			Attributes: map[string]schema.Attribute{
+			// 				"role_id": schema.StringAttribute{
+			// 					Computed:            true,
+			// 					MarkdownDescription: `The key used to uniquely identify this configuration object.`,
+			// 				},
+			// 				"access_type": schema.StringAttribute{
+			// 					Computed:            true,
+			// 					MarkdownDescription: `The value of the property.`,
+			// 				},
+			// 			},
+			// 		},
+			// 	},
+
+			// 	"user_rbac": schema.SetNestedAttribute{
+			// 		MarkdownDescription: ``,
+			// 		Computed:            true,
+			// 		NestedObject: schema.NestedAttributeObject{
+			// 			Attributes: map[string]schema.Attribute{
+			// 				"name": schema.StringAttribute{
+			// 					Computed:            true,
+			// 					MarkdownDescription: `The key used to uniquely identify this configuration object.`,
+			// 				},
+			// 				"user_priv": schema.StringAttribute{
+			// 					Computed:            true,
+			// 					MarkdownDescription: `The value of the property.`,
+			// 				},
+			// 			},
+			// 		},
+			// 	},
+		},
+	}
+	tflog.Debug(ctx, "End schema of datasource: hashicups_user")
+}
+
+func (d *UserDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	tflog.Debug(ctx, "Start configure of datasource: hashicups_user")
+	// Prevent panic if the provider has not been configured.
+	if req.ProviderData == nil {
+		return
+	}
+
+	client, ok := req.ProviderData.(*client.Client)
+
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Data Source Configure Type",
+			fmt.Sprintf("Expected *client.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+		)
+
+		return
+	}
+
+	d.client = client
+	tflog.Debug(ctx, "End configure of datasource: hashicups_user")
+}
+
+func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	tflog.Debug(ctx, "Start read of datasource: hashicups_user")
+	var data *UserResourceModel
+
+	// Read Terraform configuration data into the model
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	setUserId(ctx, data)
+
+	// Create a copy of the Id for when not found during getAndSetUserAttributes
+	cachedId := data.Id.ValueString()
+
+	tflog.Debug(ctx, fmt.Sprintf("Read of datasource hashicups_user with id '%s'", data.Id.ValueString()))
+
+	getAndSetUserAttributes(ctx, &resp.Diagnostics, d.client, data)
+
+	if data.Id.IsNull() {
+		resp.Diagnostics.AddError(
+			"Failed to read hashicups_user data source",
+			fmt.Sprintf("The hashicups_user data source with id '%s' has not been found", cachedId),
+		)
+		return
+	}
+
+	// Save data into Terraform state
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	tflog.Debug(ctx, fmt.Sprintf("End read of datasource hashicups_user with id '%s'", data.Id.ValueString()))
+}
+
+func setUserId(ctx context.Context, data *UserResourceModel) {
+	// rn := getUserRn(ctx, data)
+	// data.Id = types.StringValue(fmt.Sprintf("%s/%s", data.ParentDn.ValueString(), rn))
+	data.Id = types.StringValue(data.UserName.ValueString())
+}
+
+func getAndSetUserAttributes(ctx context.Context, diags *diag.Diagnostics, client *client.Client, data *UserResourceModel) {
+	requestData := DoRestRequest(ctx, diags, client, fmt.Sprintf("api/v2/users"), "GET", nil)
+	log.Printf("[DEBUG]: ---------- requestData: %v", requestData)
+	log.Printf("[DEBUG]: ---------- requestData value check: %v", requestData.Data() != nil)
+
+	if diags.HasError() {
+		return
+	}
+
+	if requestData.Data() != nil {
+		classReadInfo := requestData.Data().([]interface{})
+		for _, classReadInfoData := range classReadInfo {
+			validUser := false
+
+			for attributeName, attributeValue := range classReadInfoData.(map[string]interface{}) {
+
+				if attributeName == "loginID" {
+					if attributeValue.(string) == "sab_test" {
+						validUser = true
+					} else {
+						continue
+					}
+				}
+
+				// log.Printf("[DEBUG]: ---------- attributeName: %v, attributeValue: %v", attributeName, attributeValue)
+
+				// attributeName: userID, attributeValue: 48d105bdfbc49a5fcf39a10b961386e61dfe40085cb0315d818b761c5735dafa
+				// attributeName: loginID, attributeValue: admin
+				// attributeName: userPreferences, attributeValue: map[autoSave:true whatsNew:false]
+				// attributeName: userflags, attributeValue: 0
+
+				if attributeName == "userID" {
+					data.UserID = basetypes.NewStringValue(attributeValue.(string))
+				}
+
+				if attributeName == "loginID" {
+					data.Id = basetypes.NewStringValue(attributeValue.(string))
+					data.UserName = basetypes.NewStringValue(attributeValue.(string))
+					// setUserParentDn(ctx, attributeValue.(string), data)
+				}
+
+				if attributeName == "userflags" {
+					data.UserFlags = basetypes.NewFloat64Value(attributeValue.(float64))
+				}
+
+				if attributeName == "firstName" {
+					data.FirstName = basetypes.NewStringValue(attributeValue.(string))
+				}
+
+				if attributeName == "lastName" {
+					data.LastName = basetypes.NewStringValue(attributeValue.(string))
+				}
+
+				if attributeName == "email" {
+					data.Email = basetypes.NewStringValue(attributeValue.(string))
+				}
+
+				if attributeName == "accountStatus" {
+					data.AccountStatus = basetypes.NewStringValue(attributeValue.(string))
+				}
+
+				if attributeName == "userPreferences" && validUser {
+					log.Printf("[DEBUG] inside userPreferences: %v", attributeValue)
+					// data.UserPreferences = schema.NewSet(schema.HashString, []interface{}{attributeValue.(map[string]interface{})})
+					// data.UserPreferences = attributeValue.(map[string]interface{})
+
+					userPreferencesModelDataList := make([]UserPreferencesModel, 0)
+
+					userPreferencesModelData := UserPreferencesModel{}
+					userPreferencesModelData.autoSave = basetypes.NewBoolValue(attributeValue.(map[string]interface{})["autoSave"].(bool))
+					userPreferencesModelData.whatsNew = basetypes.NewBoolValue(attributeValue.(map[string]interface{})["whatsNew"].(bool))
+					userPreferencesModelDataList = append(userPreferencesModelDataList, userPreferencesModelData)
+					UserPreferencesSet, err := types.SetValueFrom(ctx, data.UserPreferences.ElementType(ctx), userPreferencesModelDataList)
+					log.Printf("[DEBUG] userPreferencesModelDataList: %v, error: %v", userPreferencesModelDataList, err)
+					data.UserPreferences = UserPreferencesSet
+
+					// fvFBRMemberSet, _ := types.SetValueFrom(ctx, data.FvFBRMember.ElementType(ctx), FvFBRMemberFvFBRGroupList)
+					// data.FvFBRMember = fvFBRMemberSet
+
+				}
+
+				// type UserPreferencesModel struct {
+				// 	autoSave types.String `tfsdk:"auto_save"`
+				// 	whatsNew types.String `tfsdk:"whats_new"`
+				// }
+
+				// "user_preferences": schema.SetNestedAttribute{
+				// 	MarkdownDescription: ``,
+				// 	Computed:            true,
+				// 	NestedObject: schema.NestedAttributeObject{
+				// 		Attributes: map[string]schema.Attribute{
+				// 			"auto_save": schema.StringAttribute{
+				// 				Computed:            true,
+				// 				MarkdownDescription: `The key used to uniquely identify this configuration object.`,
+				// 			},
+				// 			"whats_new": schema.StringAttribute{
+				// 				Computed:            true,
+				// 				MarkdownDescription: `The value of the property.`,
+				// 			},
+				// 		},
+				// 	},
+				// },
+
+				// {
+
+				//    "accountStatus":"Active",
+				//    "userPreferences":{
+				//       "autoSave":true,
+				//       "whatsNew":true
+				//    },
+				//    "userflags":0,
+				//    "userRbac":{
+				//       "aaa":{
+				//          "name":"aaa",
+				//          "userPriv":"ReadPriv"
+				//       },
+				//    }
+				// }
+
+				// if attributeName == "userPreferences" {
+				// 	data.UserPreferences = basetypes.NewStringValue(attributeValue.(string))
+				// }
+
+				// if attributeName == "description" {
+				// 	data.Description = basetypes.NewStringValue(attributeValue.(string))
+				// }
+				// if attributeName == "template_name" {
+				// 	data.TemplateName = basetypes.NewStringValue(attributeValue.(string))
+				// }
+				// if attributeName == "tenant_id" {
+				// 	data.TenantId = basetypes.NewStringValue(attributeValue.(string))
+				// }
+
+				// TagAnnotationUserList := make([]TagAnnotationUserResourceModel, 0)
+				// // TagTagUserList := make([]TagTagUserResourceModel, 0)
+				// _, ok := classReadInfo[0].(map[string]interface{})["children"]
+				// if ok {
+				// 	children := classReadInfo[0].(map[string]interface{})["children"].([]interface{})
+				// 	for _, child := range children {
+				// 		for childClassName, childClassDetails := range child.(map[string]interface{}) {
+				// 			childAttributes := childClassDetails.(map[string]interface{})["attributes"].(map[string]interface{})
+				// 			if childClassName == "tagAnnotation" {
+				// 				TagAnnotationUser := TagAnnotationUserResourceModel{}
+				// 				for childAttributeName, childAttributeValue := range childAttributes {
+
+				// 					if childAttributeName == "name" {
+				// 						TagAnnotationUser.Name = basetypes.NewStringValue(childAttributeValue.(string))
+				// 					}
+				// 					if childAttributeName == "display_name" {
+				// 						TagAnnotationUser.DisplayName = basetypes.NewStringValue(childAttributeValue.(string))
+				// 					}
+
+				// 					if childAttributeName == "description" {
+				// 						TagAnnotationUser.Description = basetypes.NewStringValue(childAttributeValue.(string))
+				// 					}
+				// 					if childAttributeName == "tenant_id" {
+				// 						TagAnnotationUser.TenantId = basetypes.NewStringValue(childAttributeValue.(string))
+				// 					}
+				// 					if childAttributeName == "template_type" {
+				// 						TagAnnotationUser.TemplateType = basetypes.NewStringValue(childAttributeValue.(string))
+				// 					}
+
+				// 				}
+				// 				TagAnnotationUserList = append(TagAnnotationUserList, TagAnnotationUser)
+				// 			}
+				// 		}
+				// 	}
+				// }
+				// tagAnnotationSet, _ := types.SetValueFrom(ctx, data.Template.ElementType(ctx), TagAnnotationUserList)
+				// data.Template = tagAnnotationSet
+				// tagTagSet, _ := types.SetValueFrom(ctx, data.TagTag.ElementType(ctx), TagTagUserList)
+				// data.TagTag = tagTagSet
+			}
+		}
+		// else {
+		// 	diags.AddError(
+		// 		"too many results in response",
+		// 		fmt.Sprintf("%v matches returned for class 'User'. Please report this issue to the provider developers.", len(classReadInfo)),
+		// 	)
+		// }
+	} else {
+		data.Id = basetypes.NewStringNull()
+	}
+}
+
+// // [
+// //   // Local user
+// //   {
+// //     "userID": "7100b1d47e41f443f11b0ed8b5469c10656d83d85fa8f5726dae32d4097202d8",
+// //     "loginID": "ansible_github_ci_2",
+// //     "firstName": "ansible2",
+// //     "lastName": "ci",
+// //     "email": "ansible2@ci.com",
+// //     "accountStatus": "Active",
+// //     "userPreferences": {
+// //       "autoSave": true,
+// //       "whatsNew": true
+// //     },
+// //     "userflags": 0,
+// //     "userRbac": {
+// //       "admin": {
+// //         "name": "admin",
+// //         "userPriv": "WritePriv"
+// //       },
+// //       "app-user": {
+// //         "name": "app-user",
+// //         "userPriv": "ReadPriv"
+// //       }
+// //     }
+// //   },
+
+// {
+//    "userID":"9478c98144250619646ca484a2283b52ea0d6fa52317055cf751ffe275896a35",
+//    "loginID":"sab_test",
+//    "firstName":"Sabari",
+//    "lastName":"Jaganathan",
+//    "email":"sab@ok.com",
+//    "accountStatus":"Active",
+//    "userPreferences":{
+//       "autoSave":true,
+//       "whatsNew":true
+//    },
+//    "userflags":0,
+//    "userRbac":{
+//       "aaa":{
+//          "name":"aaa",
+//          "userPriv":"ReadPriv"
+//       },
+//       "app-user":{
+//          "name":"app-user",
+//          "userPriv":"ReadPriv"
+//       },
+//       "approver":{
+//          "name":"approver",
+//          "userPriv":"WritePriv"
+//       },
+//       "config-manager":{
+//          "name":"config-manager",
+//          "userPriv":"ReadPriv"
+//       },
+//       "site-admin":{
+//          "name":"site-admin",
+//          "userPriv":"ReadPriv"
+//       },
+//       "site-policy":{
+//          "name":"site-policy",
+//          "userPriv":"ReadPriv"
+//       },
+//       "tenant-policy":{
+//          "name":"tenant-policy",
+//          "userPriv":"ReadPriv"
+//       }
+//    }
+// }
+
+// Userflags types.int `tfsdk:"userflags"`
+// UserPreferences types.Set `tfsdk:"userPreferences"`
+// UserRbac types.Set `tfsdk:"userRbac"`
+
+// type UserPreferencesModel struct {
+// 	autoSave            types.String `tfsdk:"autoSave"`
+// 	whatsNew      types.String `tfsdk:"whatsNew"`
+// }
+
+// type UserRbacModel struct {
+// 	Name            types.String `tfsdk:"name"`
+// 	UserPriv      types.String `tfsdk:"userPriv"`
+// }
+
+//   // Sample remote user
+//   {
+//     "userID": "7931294533dc408b33d241716c71507d221c97062751fba200d939451485fbbd",
+//     "loginID": "lhercot",
+//     "userPreferences": {
+//       "autoSave": true,
+//       "whatsNew": true
+//     },
+//     "userflags": 1,
+//     "userRbac": {
+//       "admin": {
+//         "name": "admin",
+//         "userPriv": "WritePriv"
+//       }
+//     }
+//   }
+
+// ]
+
+// {
+// 	"userInfo":"sab",
+// 	"userRbac": {
+//       "user1": {
+//         "name": "user1",
+//         "userPriv": "WritePriv"
+//       },
+//       "user2": {
+//         "name": "user2",
+//         "userPriv": "ReadPriv"
+//       }
+// 	}
+// }
+
+// type User struct {
+// 	Name     string `json:"name"`
+// 	UserPriv string `json:"userPriv"`
+// }
+
+// type UserInfo struct {
+// 	UserInfo map[string]User `json:"userRbac"`
+// }
